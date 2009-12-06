@@ -1,0 +1,120 @@
+#!/bin/bash
+# Initializes MPI/PVM cluster and calls an R script for a job submitted to Torque.
+# Author: Jeff Arnold, earlier work by ...?
+
+## Options of which R scripting to use
+RBIN="/usr/local/bin/R"
+RSCRIPT="/usr/local/bin/Rscript"
+
+## Check that it is being called from within torque
+if [ -z "${PBS_NODEFILE}" ]
+then
+    echo "r-torque can only be used in a script called by qsub."
+    exit 1
+fi
+
+## MPI or PVM to run - why pvm as default?
+CLTYPE="PVM"
+VERBOSE=1
+while getopts "mpqh" Option
+do 
+    case $Option in
+    m) 	CLTYPE="MPI" ;;
+    p)	CLTYPE="PVM" ;; 
+    q)  VERBOSE=0 ;;
+    h)  
+cat <<EOM 
+usage: r-torque [OPTIONS] filename
+
+Run an R script using either PVM or MPI on the cluster.
+This command handles the grunt work of initializing PVM or MPI.
+
+IMPORTANT: This command will only work if used within a script called by qsub. 
+
+Options:
+-m    use MPI.
+-s    use PVM (the default).
+-q    Do not echo commands in the R script, i.e. set options(echo=FALSE) in R.
+-h    Print out this help message and exit
+
+This command passes two arguments to the R script that it calls (see the help for commandArgs() in R).
+
+1. Number of nodes allocated by torque.
+2. "MPI" or "PVM" 
+
+EOM
+	exit
+	;;
+    esac	
+done
+
+## R filename
+shift $(($OPTIND - 1))
+INFN="$PBS_O_WORKDIR/$1" 
+
+# show the working nodes Torque reserved for you
+
+## If I don't cd to workdir, then R opens in home directory
+cd $PBS_O_WORKDIR
+
+echo "Runing $INFN using $CLTYPE" 
+echo "My machine will have the following nodes:"
+echo "-----------------------------------------"
+cat ${PBS_NODEFILE}
+echo "-----------------------------------------"
+
+### Number of nodes allocated
+NNODE=$(wc -l ${PBS_NODEFILE} | awk '{print $1}' )
+
+#echo "using $NNODE nodes"
+
+## Create a file for the log
+LOGFN=$(mktemp) || exit 1
+
+## Input script 
+## for MPI I have to alter it so I copty to a tempfile"
+TMPFN=$(mktemp) || exit 1
+if [[ $VERBOSE > 0 ]] 
+then
+	echo "options(echo=TRUE)" > $TMPFN
+	cat $INFN >> $TMPFN
+else 
+	cat $INFN > $TMPFN
+fi
+
+RCMD="$RSCRIPT --verbose $TMPFN $NNODE $CLTYPE > $LOGFN"
+
+### MPI ######################3
+if [ "$CLTYPE" = "MPI" ] 
+then
+
+	## This shouldn't be necessary and probably better to handle in the shell, 
+	echo "library(Rmpi); mpi.quit()" >> $TMPFN
+	mpirun -np 1 -hostfile $PBS_NODEFILE $RCMD
+
+### PVM ######################3
+else 
+
+## run pvm on the reserved nodes
+pvm $PBS_NODEFILE <<EOF
+conf
+quit
+EOF
+
+## Run R
+$RCMD 
+
+## Kill PVM just to be safe
+pvm <<EOF
+halt
+EOF
+
+fi
+
+## print out the logfile and clean up
+cat $LOGFN && rm $LOGFN
+
+## Cleanup
+[ -e "$TMPFN" ] && rm $TMPFN
+
+exit 0

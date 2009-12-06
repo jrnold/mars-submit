@@ -1,0 +1,110 @@
+Using R with Toque on the Mars Cluster
+-----------------------------------------
+
+:Jeff Arnold:
+:May 20, 2009:
+
+The following is an introduction of how to use the Torque scheduler to run an R
+script on the Mars cluster.  I will explain how to install and use a script
+``r-torque`` which simplifies submitting R jobs to Torque considerably.  I
+assume some basic level of proficiency with Linux and I do not explain the
+Torque scheduler here. 
+
+Installing r-torque
+==========================
+
+Simply type 
+
+::
+
+    $ make install
+
+This will create the directory "~/bin" if none exists, and copy r-torque into
+that directory.
+
+Open up or create the file ~/.bashrc in the text editor of your choice and 
+add the following line to the end of the file.  
+
+::
+
+    export PATH="$PATH:~/bin"
+
+This adds r-torque to the search path of executables. You could still use
+r-torque without this step, but you would need to always specify the r-torque 
+by its full path, e.g. ~/bin/r-torque.
+
+Using r-torque
+=====================
+
+Commands that you want to run with Torque must be put in a shell script.  The
+``r-torque`` script handles the grunt work for setting up the cluster of nodes
+and running an r-script under the torque scheduling system, making this shell
+script a one-liner.  Suppose your R script file is /path/to/foo.R Then the
+shell script that you will submit to Torque is simply
+
+::
+
+    r-torque /path/to/foo.R
+
+Suppose you save that shell script as foo.sh, then to submit the job to the
+torque scheduler ( with 4 nodes allocated) at the command line type **r-torque
+can only be used in a script that is passed to qsub.  It will not work
+otherwise.**
+
+::
+
+    $ qsub -l nodes=4 foo.sh
+
+Torque has several options.  You can see documentation for r-torque via the
+command line with
+
+    $ r-torque -h
+
+By default, ``r-torque`` sets up a PVM cluster.  To use MPI, use -m option.
+
+::
+
+    r-torque -m /path/to/foo.R
+
+By default, ``r-torque`` echoes all R commands, as in R CMD BATCH.  To suppress
+this, and run the script silently (as in Rscript) use the -q option.  In this
+case, the only explicit print() or cat() statements will appear in the output.
+    
+::
+
+    r-torque -q /path/to/foo.R
+
+On submitting a job with qsub, you will be given a job id number.  After the
+job is complete it will create two files in the form foo.sh.eXXX and
+foo.sh.oXXX.  The .oXXX file has the output (stdout), while the .eXXX file
+contains error information (stderr).
+
+``r-torque`` calls the R script with arguments giving the number of nodes
+allocated to the process by torque and the type of cluster being used.  This
+allows you to write the R script without hard-coding this information.  Once
+problem with hard-coding the number of nodes, is that if may forget to make the
+number of nodes allocated in the R program the same as what you specify in
+``qsub``.  And if too many are allocated, errors will occur; if too few, you
+might not be taking full advantage of your torque quota.  The following example
+shows how to retrieve the arguments that ``r-torque`` passes to the R script
+and use them to initialize a cluster using the **snow** package.
+
+::
+
+    library(snow)
+
+    ## Print the arguments that r-torque has passed to it
+    print(commandArgs(TRUE))
+
+    ## Create a snow cluster without hardcoding either 
+    ## the type of cluster or number of nodes.
+    nNodes <- as.integer(commandArgs(TRUE)[1])
+    clType <- commandArgs(TRUE)[2]
+    cl <- makeCluster(nNodes, clType)
+
+    ## Print out the cluster specs
+    print(cl)
+
+    ## stop the cluster.
+    stopCluster(cl)
+
